@@ -1,0 +1,146 @@
+<!doctype html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="initial-scale=1.0, user-scalable=no, width=device-width">
+    <link rel="stylesheet" href="https://a.amap.com/jsapi_demos/static/demo-center/css/demo-center.css" />
+    <title>地图显示</title>
+    <style>
+        html,
+        body,
+        #container {
+          width: 90%;
+          height: 100%;
+          float: left;
+        }
+    </style>
+<style>
+.main_right {
+    width: 10%;
+    height: 100%;
+    float: right;
+}
+</style>
+</head>
+<body>
+<div id="container"></div>
+<div class="main_right">
+    <p>请选择excel文件: </p>
+    <p><input type="file" name="xlfile" id="xlf" /></p>
+</div>
+<!-- 加载地图JSAPI脚本 -->
+<script src="https://webapi.amap.com/maps?v=1.4.10&key=d2c30b004ab1ae0ca069e5507ee148b2"></script>
+<script src="https://unpkg.com/xlsx/dist/xlsx.full.min.js"></script>
+<script type="text/javascript">
+    var map = new AMap.Map('container', {
+        resizeEnable: true, //是否监控地图容器尺寸变化
+        zoom:11, //初始化地图层级
+        center: [116.397428, 39.90923] //初始化地图中心点
+    });
+
+    var xlfile = document.getElementById("xlf");
+    xlfile.addEventListener('change', handleFile, false);
+
+    var raw_data = new Array();
+
+    function handleFile(e) {
+        var files = e.target.files;
+        var file = files[0];
+        readFile(file);
+        handleData(raw_data);
+    }
+
+    function readFile(file) {
+        var file_name = file.name;
+        var reader = new FileReader();
+        reader.onload = function(e) {
+            var data = e.target.result;
+            var workbook = XLSX.read(data, {type: "binary"});
+            //var sheet_name = "干货整合中心选址";
+            var sheet_name = "test";
+            var sheet = workbook.Sheets[sheet_name];
+            var range = XLSX.utils.decode_range(sheet['!ref']);
+
+            // 得到行列的开始和结束
+            var col_start = range.s.c, col_end = range.e.c,
+                row_start = range.s.r, row_end = range.e.r;
+            for(row_start=2; row_start<=row_end; row_start++) {
+                row_data = new Array();
+                for(i=col_start; i<=col_end; i++) {
+                    addr = XLSX.utils.encode_col(i) + XLSX.utils.encode_row(row_start);
+                    cell = sheet[addr];
+                    row_data.push(cell.v);
+                }
+                raw_data.push(row_data);
+            }
+        };
+        reader.readAsBinaryString(file);
+    }
+
+    function handleData(raw_data) {
+        console.log(raw_data);
+        console.log("initial location is (%d, %d)", 13, 12);
+        console.log("raw_data length is : %s", raw_data.length);
+        // 到此位置现在所有的数据都保存在raw_data里面了，包含城市和经纬度
+        // 下面开始循环计算最优地点
+
+        x_pre = 0.0;
+        y_pre = 0.0;
+        
+        x_opt = 0.0;
+        y_opt = 0.0;
+
+        iteration_ct = 1;
+        dis_total_opt = 0.0;
+        dis_total_pre = 0.0;
+
+        x_sum_1 = x_sum_2 = 0;
+        y_sum_1 = y_sum_2 = 0;
+
+
+        for(i=0; i<raw_data.length; i++) {
+            dis_total_opt = dis_total_opt + queryDistanceByAmap(x_opt, y_opt, raw_data[i][1], raw_data[i][2])* raw_data[i][3];
+        }
+
+        while(1) {
+            iteration_ct = iteration_ct + 1;
+            dis_total_pre = dis_total_opt;
+            dis_total_opt = 0.0;
+            x_pre = x_opt;
+            y_pre = y_opt;
+            for(i=0; i<raw_data.length; i++) {
+                // 复用distance, 减少对于高德接口的调用
+                distance = queryDistanceByAmap(x_pre, y_pre, raw_data[i][1], raw_data[i][2])
+                x_sum_1 = x_sum_1 + raw_data[i][1]*raw_data[i][3]/distance;
+                x_sum_2 = x_sum_2 + raw_data[i][3]/distance;
+                y_sum_1 = y_sum_1 + raw_data[i][2]*raw_data[i][3]/distance;
+                y_sum_2 = y_sum_2 + raw_data[i][3]/distance;
+            }
+            x_opt = x_sum_1 / x_sum_2;
+            y_opt = y_sum_1 / y_sum_2;
+            // 此时计算出了新的最优点(x_opt, y_opt),需要计算运费
+            for(i=0; i< raw_data.length; i++) {
+                dis_total_opt = dis_total_opt + queryDistanceByAmap(x_opt, y_opt, raw_data[i][1], raw_data[i][2])*raw_data[i][3];
+            }
+            // 然后计算当前差值是否满足条件
+            diff = Math.abs(dis_total_opt-dis_total_pre);
+            if (Math.abs(dis_total_opt-dis_total_pre) < 1) {
+                break;
+            }
+        }
+
+        console.log("最优点为: (%f, %f), 一共计算了 %d 次", x_opt, y_opt, iteration_ct);
+    }
+
+    // 传入两个地点的经纬度参数， 调用高德地图的接口返回两个地点的实际地面距离
+    function queryDistanceByAmap(x_first, y_first, x_second, y_second) {
+        var arr = new Array();
+        arr.push(new AMap.LngLat(x_first, y_first));
+        arr.push(new AMap.LngLat(x_second, y_second));
+        var distance = AMap.GeometryUtil.distanceOfLine(arr);
+        return distance;
+    }
+</script>
+</body>
+</html>
